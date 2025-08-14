@@ -11,6 +11,9 @@
 (define-constant ERR-DISPUTE-RESOLVED (err u108))
 (define-constant ERR-ALREADY-REVIEWED (err u109))
 (define-constant ERR-INVALID-RATING (err u110))
+(define-constant ERR-PROPOSAL-EXISTS (err u111))
+(define-constant ERR-INVALID-PRICE (err u112))
+(define-constant ERR-PROPOSAL-NOT-FOUND (err u113))
 
 ;; Contract owner
 (define-data-var contract-owner principal tx-sender)
@@ -81,9 +84,31 @@
     }
 )
 
+(define-map MarketDemand
+    { produce-type: (string-ascii 64) }
+    {
+        total-inquiries: uint,
+        average-proposed-price: uint,
+        last-updated: uint
+    }
+)
+
+(define-map PriceProposals
+    { proposal-id: uint }
+    {
+        buyer: principal,
+        produce-type: (string-ascii 64),
+        proposed-price: uint,
+        units-wanted: uint,
+        timestamp: uint,
+        status: (string-ascii 20)
+    }
+)
+
 ;; Data variables for nonces
 (define-data-var listing-nonce uint u0)
 (define-data-var order-nonce uint u0)
+(define-data-var proposal-nonce uint u0)
 
 ;; Create a new produce listing
 (define-public (create-listing 
@@ -362,6 +387,98 @@
     )
 )
 
+;; Submit price proposal
+(define-public (submit-price-proposal
+    (produce-type (string-ascii 64))
+    (proposed-price uint)
+    (units-wanted uint))
+    (let
+        ((proposal-id (+ (var-get proposal-nonce) u1))
+         (current-demand (default-to 
+            { total-inquiries: u0, average-proposed-price: u0, last-updated: u0 }
+            (map-get? MarketDemand { produce-type: produce-type }))))
+        
+        (asserts! (> proposed-price u0) ERR-INVALID-PRICE)
+        (asserts! (> units-wanted u0) ERR-INVALID-AMOUNT)
+        
+        (map-set PriceProposals
+            { proposal-id: proposal-id }
+            {
+                buyer: tx-sender,
+                produce-type: produce-type,
+                proposed-price: proposed-price,
+                units-wanted: units-wanted,
+                timestamp: stacks-block-height,
+                status: "active"
+            }
+        )
+        
+        (let
+            ((new-total-inquiries (+ (get total-inquiries current-demand) u1))
+             (current-total-value (* (get total-inquiries current-demand) (get average-proposed-price current-demand)))
+             (new-total-value (+ current-total-value proposed-price))
+             (new-average-price (if (> new-total-inquiries u0)
+                                   (/ new-total-value new-total-inquiries)
+                                   u0)))
+            
+            (map-set MarketDemand
+                { produce-type: produce-type }
+                {
+                    total-inquiries: new-total-inquiries,
+                    average-proposed-price: new-average-price,
+                    last-updated: stacks-block-height
+                }
+            )
+        )
+        
+        (var-set proposal-nonce proposal-id)
+        (ok proposal-id)
+    )
+)
+
+;; Accept price proposal (farmer only)
+(define-public (accept-price-proposal
+    (proposal-id uint))
+    (let
+        ((proposal (unwrap! (map-get? PriceProposals { proposal-id: proposal-id }) ERR-PROPOSAL-NOT-FOUND)))
+        
+        (asserts! (is-eq (get status proposal) "active") ERR-PROPOSAL-NOT-FOUND)
+        
+        (map-set PriceProposals
+            { proposal-id: proposal-id }
+            (merge proposal { status: "accepted" })
+        )
+        
+        (ok true)
+    )
+)
+
+;; Get market insights for produce type
+(define-read-only (get-market-demand
+    (produce-type (string-ascii 64)))
+    (ok (map-get? MarketDemand { produce-type: produce-type }))
+)
+
+;; Get suggested price based on market demand
+(define-read-only (get-suggested-price
+    (produce-type (string-ascii 64)))
+    (let
+        ((demand-data (map-get? MarketDemand { produce-type: produce-type })))
+        (match demand-data
+            market-info
+                (let
+                    ((base-price (get average-proposed-price market-info))
+                     (demand-factor (if (> (get total-inquiries market-info) u5)
+                                      (/ (get total-inquiries market-info) u5)
+                                      u1))
+                     (suggested-price (+ base-price (/ (* base-price demand-factor) u10))))
+                    (ok (some suggested-price))
+                )
+            (ok none)
+        )
+    )
+)
+
 ;; Read-only functions
 (define-read-only (get-listing
     (listing-id uint))
@@ -391,6 +508,11 @@
 (define-read-only (get-review
     (order-id uint))
     (ok (map-get? Reviews { order-id: order-id }))
+)
+
+(define-read-only (get-price-proposal
+    (proposal-id uint))
+    (ok (map-get? PriceProposals { proposal-id: proposal-id }))
 )
 
 (define-read-only (get-contract-owner)
