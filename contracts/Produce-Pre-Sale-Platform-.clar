@@ -14,6 +14,8 @@
 (define-constant ERR-PROPOSAL-EXISTS (err u111))
 (define-constant ERR-INVALID-PRICE (err u112))
 (define-constant ERR-PROPOSAL-NOT-FOUND (err u113))
+(define-constant ERR-INSUFFICIENT-POINTS (err u114))
+(define-constant ERR-INVALID-DISCOUNT (err u115))
 
 ;; Contract owner
 (define-data-var contract-owner principal tx-sender)
@@ -105,10 +107,32 @@
     }
 )
 
+(define-map LoyaltyPoints
+    { buyer: principal }
+    {
+        total-points: uint,
+        points-used: uint,
+        current-balance: uint,
+        last-updated: uint
+    }
+)
+
+(define-map PointRedemptions
+    { redemption-id: uint }
+    {
+        buyer: principal,
+        points-redeemed: uint,
+        discount-amount: uint,
+        order-id: uint,
+        timestamp: uint
+    }
+)
+
 ;; Data variables for nonces
 (define-data-var listing-nonce uint u0)
 (define-data-var order-nonce uint u0)
 (define-data-var proposal-nonce uint u0)
+(define-data-var redemption-nonce uint u0)
 
 ;; Create a new produce listing
 (define-public (create-listing 
@@ -183,6 +207,9 @@
         
         ;; Update farmer sales count
         (unwrap-panic (update-farmer-sales (get farmer listing)))
+        
+        ;; Award loyalty points to buyer (1 point per STX spent)
+        (unwrap-panic (award-loyalty-points tx-sender total-cost))
         
         (var-set order-nonce order-id)
         (ok order-id)
@@ -387,6 +414,126 @@
     )
 )
 
+;; Purchase with loyalty discount
+(define-public (purchase-with-loyalty-discount
+    (listing-id uint)
+    (units uint)
+    (points-to-redeem uint))
+    (let
+        ((listing (unwrap! (map-get? ProduceListing { listing-id: listing-id }) ERR-LISTING-NOT-FOUND))
+         (buyer-loyalty (default-to 
+            { total-points: u0, points-used: u0, current-balance: u0, last-updated: u0 }
+            (map-get? LoyaltyPoints { buyer: tx-sender })))
+         (total-cost (* units (get price-per-unit listing)))
+         (discount-amount (/ points-to-redeem u10))
+         (final-cost (if (>= total-cost discount-amount)
+                        (- total-cost discount-amount)
+                        u0))
+         (order-id (+ (var-get order-nonce) u1))
+         (redemption-id (+ (var-get redemption-nonce) u1)))
+        
+        (asserts! (<= units (get units-available listing)) ERR-INVALID-AMOUNT)
+        (asserts! (is-eq (get status listing) "active") ERR-NOT-READY)
+        (asserts! (<= points-to-redeem (get current-balance buyer-loyalty)) ERR-INSUFFICIENT-POINTS)
+        (asserts! (> points-to-redeem u0) ERR-INVALID-DISCOUNT)
+        (asserts! (<= discount-amount total-cost) ERR-INVALID-DISCOUNT)
+        
+        ;; Transfer discounted amount to contract for escrow
+        (try! (stx-transfer? final-cost tx-sender (as-contract tx-sender)))
+        
+        ;; Update listing availability
+        (map-set ProduceListing
+            { listing-id: listing-id }
+            (merge listing { 
+                units-available: (- (get units-available listing) units)
+            })
+        )
+        
+        ;; Create purchase order
+        (map-set PurchaseOrders
+            { order-id: order-id }
+            {
+                buyer: tx-sender,
+                listing-id: listing-id,
+                units-purchased: units,
+                total-price: final-cost,
+                delivery-status: "pending",
+                escrow-status: "held",
+                reviewed: false
+            }
+        )
+        
+        ;; Create escrow entry
+        (map-set EscrowFunds
+            { order-id: order-id }
+            {
+                amount: final-cost,
+                released: false
+            }
+        )
+        
+        ;; Redeem loyalty points
+        (let
+            ((new-points-used (+ (get points-used buyer-loyalty) points-to-redeem))
+             (new-current-balance (- (get current-balance buyer-loyalty) points-to-redeem)))
+            
+            (map-set LoyaltyPoints
+                { buyer: tx-sender }
+                (merge buyer-loyalty {
+                    points-used: new-points-used,
+                    current-balance: new-current-balance,
+                    last-updated: stacks-block-height
+                })
+            )
+        )
+        
+        ;; Record redemption
+        (map-set PointRedemptions
+            { redemption-id: redemption-id }
+            {
+                buyer: tx-sender,
+                points-redeemed: points-to-redeem,
+                discount-amount: discount-amount,
+                order-id: order-id,
+                timestamp: stacks-block-height
+            }
+        )
+        
+        ;; Update farmer sales count and award loyalty points for remaining amount
+        (unwrap-panic (update-farmer-sales (get farmer listing)))
+        (unwrap-panic (award-loyalty-points tx-sender final-cost))
+        
+        (var-set order-nonce order-id)
+        (var-set redemption-nonce redemption-id)
+        (ok order-id)
+    )
+)
+
+;; Award loyalty points
+(define-private (award-loyalty-points
+    (buyer principal)
+    (amount uint))
+    (let
+        ((current-loyalty (default-to 
+            { total-points: u0, points-used: u0, current-balance: u0, last-updated: u0 }
+            (map-get? LoyaltyPoints { buyer: buyer })))
+         (points-to-award amount)
+         (new-total-points (+ (get total-points current-loyalty) points-to-award))
+         (new-current-balance (+ (get current-balance current-loyalty) points-to-award)))
+        
+        (map-set LoyaltyPoints
+            { buyer: buyer }
+            {
+                total-points: new-total-points,
+                points-used: (get points-used current-loyalty),
+                current-balance: new-current-balance,
+                last-updated: stacks-block-height
+            }
+        )
+        (ok true)
+    )
+)
+
 ;; Submit price proposal
 (define-public (submit-price-proposal
     (produce-type (string-ascii 64))
@@ -513,6 +660,21 @@
 (define-read-only (get-price-proposal
     (proposal-id uint))
     (ok (map-get? PriceProposals { proposal-id: proposal-id }))
+)
+
+(define-read-only (get-loyalty-points
+    (buyer principal))
+    (ok (map-get? LoyaltyPoints { buyer: buyer }))
+)
+
+(define-read-only (get-point-redemption
+    (redemption-id uint))
+    (ok (map-get? PointRedemptions { redemption-id: redemption-id }))
+)
+
+(define-read-only (calculate-discount
+    (points uint))
+    (ok (/ points u10))
 )
 
 (define-read-only (get-contract-owner)
