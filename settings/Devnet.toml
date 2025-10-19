@@ -1,0 +1,44 @@
+[network]
+name = "devnet"
+node_rpc_address = "http://localhost:20443"
+deployment_fee_rate = 10
+
+[accounts.deployer]
+mnemonic = "twice kind fence tip hidden tilt action fragile skin nothing glory cousin green tomorrow spring wrist shed math olympic multiply hip blue scout claw"
+balance = 100000000000000
+# Secret key: 753b7cc01a1a2e86221266a154af739463fce51219d97e4f856cd7200c3bd2a601
+# Public key: 0390a5cac7c33fda49f70bc1b0866fa0ba7a9440d9de647fecb8132ceb76a94dfa
+# Address: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM
+# BTC Address: mqVnk6NPRdhntvfm4hh9vvjiRkFDUuSYsH
+
+[accounts.wallet_1]
+mnemonic = "sell invite acquire kitten bamboo drastic jelly vivid peace spawn twice guilt pave pen trash pretty park cube fragile unaware remain midnight betray rebuild"
+balance = 100000000000000
+# Secret key: 7287ba251d44a4d3fd9276c88ce34c5c52a038955511cccaf77e61068649c17801
+# Public key: 03b8651ce8b4a7c3c38c6b40c0f0c3b7d4c5a96a5af19a5c7a5c9c3e3b7b1a2b3
+# Address: ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5
+# BTC Address: mr1iPkD9N3RJZZxXRk7xF9d36gffa6exNC
+
+[accounts.wallet_2]
+mnemonic = "hold excess usual excess ring elephant install account glad dry fragile donkey gaze humble truck breeze nation gasp vacuum limb head keep delay hospital"
+balance = 100000000000000
+# Secret key: 530d9f61984c888536871c6573073bdfc0058896dc1adfe9a6a10dfb9b04155a01
+# Public key: 0216c7b2b7e5ea8b5a5a8e29e5c5e5a5c9c5e5a5e5a8e5a5a8e8a5a8e8a8a8a8
+# Address: ST2CY5V39NHDPWSXMW9QDT3HC3GD6Q6XX4CFRK9AG
+# BTC Address: muYdXKmX9bByAueDe6KFfHd5Ff1gdN9ErG
+
+[accounts.wallet_3]
+mnemonic = "cycle puppy glare enroll cost improve round trend wrist mushroom scorpion tower claim oppose clever elephant dinosaur eight problem before frozen dune wagon high"
+balance = 100000000000000
+# Secret key: d655b2523bcd65e34889725c73064feb17ceb796831c0e111ba1a552b0f31b3901
+# Public key: 022a472219ad46a110f8a41a8a4e4b57b15c5e5e5e5e8e5e5e5e5e5e5e5e5e5e5
+# Address: ST2JHG361ZXG51QTKY2NQCVBPPRRE2KZB1HR05NNC
+# BTC Address: mvZtbibDPyjyU33AuBqhbKjzVuPaqdHEMf
+
+[accounts.wallet_4]
+mnemonic = "board list obtain sugar hour worth raven scout denial thunder horse logic fury scorpion fold genuine phrase wealth news aim below celery when cabin"
+balance = 100000000000000
+# Secret key: f9d7206a47f14d2870c163ebab4bf3e70d18f5d14ce76a25f8b5ac1c9d1fa85001
+# Public key: 03ad618df73733a7add040db7f8b697f0db2a5d6b1a5a8e8a8a8a8e8a8a8a8a8
+# Address: ST2NEB84ASENDXKYGJPQW86YXQCEFEX2ZQPYYB2VZ
+# BTC Address: ms2z2uuubdQvEchyNkJnHmhyBUbcSmRKDV
