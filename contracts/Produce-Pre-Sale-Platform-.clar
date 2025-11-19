@@ -21,6 +21,8 @@
 (define-constant ERR-INVALID-QUANTITY (err u118))
 (define-constant ERR-EXPIRED-PRODUCE (err u119))
 (define-constant ERR-LOW-STOCK-THRESHOLD (err u120))
+(define-constant ERR-TIER-NOT-FOUND (err u121))
+(define-constant ERR-INVALID-TIER-RATE (err u122))
 
 ;; Contract owner
 (define-data-var contract-owner principal tx-sender)
@@ -174,6 +176,26 @@
     }
 )
 
+(define-map DiscountTiers
+    { farmer: principal, tier-id: uint }
+    {
+        min-units: uint,
+        max-units: uint,
+        discount-percentage: uint,
+        created-at: uint,
+        active: bool
+    }
+)
+
+(define-map PurchaseDiscounts
+    { order-id: uint }
+    {
+        discount-amount: uint,
+        tier-id: uint,
+        discount-percentage: uint
+    }
+)
+
 ;; Data variables for nonces
 (define-data-var listing-nonce uint u0)
 (define-data-var order-nonce uint u0)
@@ -181,8 +203,144 @@
 (define-data-var redemption-nonce uint u0)
 (define-data-var movement-nonce uint u0)
 (define-data-var alert-nonce uint u0)
+(define-data-var tier-nonce uint u0)
 
-;; Create a new produce listing
+(define-public (create-discount-tier
+    (min-units uint)
+    (max-units uint)
+    (discount-percentage uint))
+    (let
+        ((tier-id (+ (var-get tier-nonce) u1)))
+        (asserts! (> min-units u0) ERR-INVALID-QUANTITY)
+        (asserts! (< min-units max-units) ERR-INVALID-AMOUNT)
+        (asserts! (<= discount-percentage u100) ERR-INVALID-TIER-RATE)
+        (map-set DiscountTiers
+            { farmer: tx-sender, tier-id: tier-id }
+            {
+                min-units: min-units,
+                max-units: max-units,
+                discount-percentage: discount-percentage,
+                created-at: stacks-block-height,
+                active: true
+            }
+        )
+        (var-set tier-nonce tier-id)
+        (ok tier-id)
+    )
+)
+
+(define-public (deactivate-discount-tier
+    (tier-id uint))
+    (let
+        ((tier (unwrap! (map-get? DiscountTiers { farmer: tx-sender, tier-id: tier-id }) ERR-TIER-NOT-FOUND)))
+        (map-set DiscountTiers
+            { farmer: tx-sender, tier-id: tier-id }
+            (merge tier { active: false })
+        )
+        (ok true)
+    )
+)
+
+(define-private (calculate-discount
+    (farmer principal)
+    (units uint)
+    (base-price uint))
+    (let
+        ((tier-u1 (map-get? DiscountTiers { farmer: farmer, tier-id: u1 }))
+         (tier-u2 (map-get? DiscountTiers { farmer: farmer, tier-id: u2 }))
+         (tier-u3 (map-get? DiscountTiers { farmer: farmer, tier-id: u3 })))
+        (let
+            ((discount-percentage
+                (match tier-u1
+                    t1 (if (and (>= units (get min-units t1)) (<= units (get max-units t1)) (get active t1))
+                            (get discount-percentage t1)
+                            (match tier-u2
+                                t2 (if (and (>= units (get min-units t2)) (<= units (get max-units t2)) (get active t2))
+                                        (get discount-percentage t2)
+                                        (match tier-u3
+                                            t3 (if (and (>= units (get min-units t3)) (<= units (get max-units t3)) (get active t3))
+                                                    (get discount-percentage t3)
+                                                    u0
+                                                )
+                                            u0
+                                        )
+                                    )
+                                u0
+                            )
+                        )
+                    (match tier-u2
+                        t2 (if (and (>= units (get min-units t2)) (<= units (get max-units t2)) (get active t2))
+                                (get discount-percentage t2)
+                                (match tier-u3
+                                    t3 (if (and (>= units (get min-units t3)) (<= units (get max-units t3)) (get active t3))
+                                            (get discount-percentage t3)
+                                            u0
+                                        )
+                                    u0
+                                )
+                            )
+                        (match tier-u3
+                            t3 (if (and (>= units (get min-units t3)) (<= units (get max-units t3)) (get active t3))
+                                    (get discount-percentage t3)
+                                    u0
+                                )
+                            u0
+                        )
+                    )
+                )
+            ))
+            (/ (* base-price discount-percentage) u100)
+        )
+    )
+)
+
+(define-private (get-tier-id
+    (farmer principal)
+    (units uint))
+    (let
+        ((tier-u1 (map-get? DiscountTiers { farmer: farmer, tier-id: u1 }))
+         (tier-u2 (map-get? DiscountTiers { farmer: farmer, tier-id: u2 }))
+         (tier-u3 (map-get? DiscountTiers { farmer: farmer, tier-id: u3 })))
+        (match tier-u1
+            t1 (if (and (>= units (get min-units t1)) (<= units (get max-units t1)) (get active t1))
+                    u1
+                    (match tier-u2
+                        t2 (if (and (>= units (get min-units t2)) (<= units (get max-units t2)) (get active t2))
+                                u2
+                                (match tier-u3
+                                    t3 (if (and (>= units (get min-units t3)) (<= units (get max-units t3)) (get active t3))
+                                            u3
+                                            u0
+                                        )
+                                    u0
+                                )
+                            )
+                        u0
+                    )
+                )
+            (match tier-u2
+                t2 (if (and (>= units (get min-units t2)) (<= units (get max-units t2)) (get active t2))
+                        u2
+                        (match tier-u3
+                            t3 (if (and (>= units (get min-units t3)) (<= units (get max-units t3)) (get active t3))
+                                    u3
+                                    u0
+                                )
+                            u0
+                        )
+                    )
+                (match tier-u3
+                    t3 (if (and (>= units (get min-units t3)) (<= units (get max-units t3)) (get active t3))
+                            u3
+                            u0
+                        )
+                    u0
+                )
+            )
+        )
+    )
+)
+
 (define-public (create-listing 
     (price-per-unit uint)
     (total-units uint)
@@ -207,58 +365,60 @@
     )
 )
 
-;; Purchase produce with escrow
 (define-public (purchase-produce
     (listing-id uint)
     (units uint))
     (let
         ((listing (unwrap! (map-get? ProduceListing { listing-id: listing-id }) ERR-LISTING-NOT-FOUND))
-         (total-cost (* units (get price-per-unit listing)))
-         (order-id (+ (var-get order-nonce) u1)))
-        
+         (base-cost (* units (get price-per-unit listing)))
+         (discount-amount (calculate-discount (get farmer listing) units base-cost))
+         (final-cost (- base-cost discount-amount))
+         (order-id (+ (var-get order-nonce) u1))
+         (applicable-tier-id (get-tier-id (get farmer listing) units)))
         (asserts! (<= units (get units-available listing)) ERR-INVALID-AMOUNT)
         (asserts! (is-eq (get status listing) "active") ERR-NOT-READY)
-        
-        ;; Transfer funds to contract for escrow
-        (try! (stx-transfer? total-cost tx-sender (as-contract tx-sender)))
-        
-        ;; Update listing availability
+        (try! (stx-transfer? final-cost tx-sender (as-contract tx-sender)))
         (map-set ProduceListing
             { listing-id: listing-id }
             (merge listing { 
                 units-available: (- (get units-available listing) units)
             })
         )
-        
-        ;; Create purchase order
         (map-set PurchaseOrders
             { order-id: order-id }
             {
                 buyer: tx-sender,
                 listing-id: listing-id,
                 units-purchased: units,
-                total-price: total-cost,
+                total-price: final-cost,
                 delivery-status: "pending",
                 escrow-status: "held",
                 reviewed: false
             }
         )
-        
-        ;; Create escrow entry
         (map-set EscrowFunds
             { order-id: order-id }
             {
-                amount: total-cost,
+                amount: final-cost,
                 released: false
             }
         )
-        
-        ;; Update farmer sales count
+        (if (> discount-amount u0)
+            (begin
+                (map-set PurchaseDiscounts
+                    { order-id: order-id }
+                    {
+                        discount-amount: discount-amount,
+                        tier-id: applicable-tier-id,
+                        discount-percentage: (/ (* discount-amount u100) base-cost)
+                    }
+                )
+                u0
+            )
+            u0
+        )
         (unwrap-panic (update-farmer-sales (get farmer listing)))
-        
-        ;; Award loyalty points to buyer (1 point per STX spent)
-        (unwrap-panic (award-loyalty-points tx-sender total-cost))
-        
+        (unwrap-panic (award-loyalty-points tx-sender final-cost))
         (var-set order-nonce order-id)
         (ok order-id)
     )
@@ -667,6 +827,17 @@
             (ok u0)
         )
     )
+)
+
+(define-read-only (get-discount-tier
+    (farmer principal)
+    (tier-id uint))
+    (ok (map-get? DiscountTiers { farmer: farmer, tier-id: tier-id }))
+)
+
+(define-read-only (get-purchase-discount
+    (order-id uint))
+    (ok (map-get? PurchaseDiscounts { order-id: order-id }))
 )
 
 (define-read-only (get-contract-owner)
